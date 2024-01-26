@@ -21,7 +21,7 @@ class ForecaRepository {
 
         const val USER = "cat-sedoff"
         const val PASSWORD = "t9LOKd2Zc3gB"
-        const val HARDCODED_LOCATION = "Barcelona"
+        const val HARDCODED_LOCATION = "Ljubljana"
     }
 
     private val retrofit = Retrofit.Builder()
@@ -36,32 +36,69 @@ class ForecaRepository {
 
     private var token = ""
 
-    fun authenticate() {
+    fun getCurrentWeather() {
         forecaService.authenticate(ForecaAuthRequest(USER, PASSWORD))
             .flatMap { tokenResponse ->
+                // Конвертируем полученный accessToken в новый запрос
                 token = tokenResponse.token
-                Log.d("RxJava", "Got new access token!")
+
+                // Переключаемся на следующий сетевой запрос
                 val bearerToken = "Bearer ${tokenResponse.token}"
                 forecaService.getLocations(bearerToken, HARDCODED_LOCATION)
+                    // Добавляем конвертацию результата в Pair,
+                    // чтобы пробросить и результат, и access token
+                    // дальше по цепочке
+                    .map { Pair(it.locations, bearerToken) }
             }
-//                val responseError = Response.error<LocationsResponse>(401, ResponseBody.create(
-//                    MediaType.get("application/json"), "{}"))
-//                val exception = HttpException(responseError)
-//
-//                Single.error<LocationsResponse>(exception)
-//            }
-            .retry { count,throwable ->
-                Log.d("RxJava", "Got error! count: $count, $throwable")
+            .flatMap { pairLocationsAndToken ->
+                // Получаем данные из Pair
+                val (locations, bearerToken) = pairLocationsAndToken
+                // Опускаем обработку кейса с отсутствием локаций
+                val firstLocation = locations.first()
+
+                // Делаем запрос на текущую погоду
+                forecaService.getForecast(bearerToken, firstLocation.id)
+            }
+            .retry { count, throwable ->
                 count < 3 && throwable is HttpException && throwable.code() == 401
             }
             .subscribeOn(Schedulers.io())
             .observeOn(AndroidSchedulers.mainThread())
             .subscribe(
-                { locationsResponse ->
-                    Log.d("RxJava", "Got location: ${locationsResponse.locations}")
+                { forecastResponse ->
+                    // В итоговый subscribe теперь приходит прогноз
+                    Log.d("RxJava", "Current forecast: ${forecastResponse.current}")
                 },
-                { error -> Log.e("RxJava", "Got error with auth or locations", error) }
+                { error -> Log.e("RxJava", "Got error with auth or locations, or forecast", error) }
             )
+    }
+
+//    fun authenticate() {
+//        forecaService.authenticate(ForecaAuthRequest(USER, PASSWORD))
+//            .flatMap { tokenResponse ->
+//                token = tokenResponse.token
+//                Log.d("RxJava", "Got new access token!")
+//                val bearerToken = "Bearer ${tokenResponse.token}"
+//                forecaService.getLocations(bearerToken, HARDCODED_LOCATION)
+//            }
+////                val responseError = Response.error<LocationsResponse>(401, ResponseBody.create(
+////                    MediaType.get("application/json"), "{}"))
+////                val exception = HttpException(responseError)
+////
+////                Single.error<LocationsResponse>(exception)
+////            }
+//            .retry { count,throwable ->
+//                Log.d("RxJava", "Got error! count: $count, $throwable")
+//                count < 3 && throwable is HttpException && throwable.code() == 401
+//            }
+//            .subscribeOn(Schedulers.io())
+//            .observeOn(AndroidSchedulers.mainThread())
+//            .subscribe(
+//                { locationsResponse ->
+//                    Log.d("RxJava", "Got location: ${locationsResponse.locations}")
+//                },
+//                { error -> Log.e("RxJava", "Got error with auth or locations", error) }
+//            )
 
 //            .enqueue(object : Callback<ForecaAuthResponse> {
 //                override fun onResponse(call: Call<ForecaAuthResponse>,
@@ -125,4 +162,4 @@ class ForecaRepository {
 //                }
 //
 //            })
-    }
+
